@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
@@ -558,6 +559,8 @@ def build_application() -> Application:
 
 
 def main() -> None:
+    # Python 3.14 no longer creates a default event loop in main thread.
+    asyncio.set_event_loop(asyncio.new_event_loop())
     app = build_application()
     app.run_polling()
 
