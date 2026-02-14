@@ -30,12 +30,15 @@ def load_fernet_from_env(env_key_name: str = "CLIENTS_KEY") -> Fernet:
             f"{env_key_name} looks like encrypted payload (clients.enc), not Fernet key."
         )
 
+    # Some UIs accidentally trim trailing "=" from base64 secrets.
+    # Re-pad to base64 block size before Fernet validation.
+    padded_key = key + ("=" * (-len(key) % 4))
     try:
-        return Fernet(key.encode("utf-8"))
+        return Fernet(padded_key.encode("utf-8"))
     except Exception as exc:  # pragma: no cover - defensive
         raise SecurityError(
-            f"{env_key_name} has invalid format for Fernet. "
-            "Expected URL-safe base64 key (usually 44 chars, ends with '=')."
+            f"{env_key_name} has invalid format for Fernet (received length={len(key)}). "
+            "Expected URL-safe base64 key (usually 44 chars, often ends with '=')."
         ) from exc
 
 
