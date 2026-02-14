@@ -14,14 +14,26 @@ Telegram-бот для генерации только DOCX-допсоглаше
    py -3 scripts/encrypt_clients.py --in data/clients.json --out data/clients.enc
    ```
 3. Если `CLIENTS_KEY` не задан, скрипт выведет новый ключ в консоль.
-4. Добавьте `CLIENTS_KEY` в Render Secrets.
-5. Удалите/не коммитьте `data/clients.json` и проверьте, что он в `.gitignore`.
+4. Опционально можно сохранить ключ в файл:
+   ```powershell
+   py -3 scripts/encrypt_clients.py --in data/clients.json --out data/clients.enc --key-out data/clients.key
+   ```
+5. Добавьте в Render Secrets:
+   - либо `CLIENTS_KEY` (сам ключ),
+   - либо `CLIENTS_KEY_FILE` (путь к файлу с ключом).
+6. Удалите/не коммитьте `data/clients.json` и проверьте, что он в `.gitignore`.
 
 ## 3) Локальный запуск
 ```powershell
 pip install -r requirements.txt
 set BOT_TOKEN=... 
 set CLIENTS_KEY=... 
+python bot.py
+```
+или
+```powershell
+set BOT_TOKEN=...
+set CLIENTS_KEY_FILE=data/clients.key
 python bot.py
 ```
 
@@ -37,7 +49,9 @@ python bot.py
    ```
 4. Добавьте ENV-переменные:
    - `BOT_TOKEN`
-   - `CLIENTS_KEY`
+   - `CLIENTS_KEY` (или `CLIENTS_KEY_FILE`)
+
+Важно: `data/clients.enc` не является ключом. Ключ короткий (обычно 44 символа, заканчивается `=`).
 
 ## 5) Как обновлять справочники
 1. `data/products.json`, `data/locations.json`, `data/aliases.json`:

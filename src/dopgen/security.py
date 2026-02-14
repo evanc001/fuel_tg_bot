@@ -10,13 +10,33 @@ class SecurityError(RuntimeError):
 
 
 def load_fernet_from_env(env_key_name: str = "CLIENTS_KEY") -> Fernet:
-    key = os.getenv(env_key_name)
+    key = (os.getenv(env_key_name) or "").strip()
+    key_file = (os.getenv(f"{env_key_name}_FILE") or "").strip()
+
+    if not key and key_file:
+        path = Path(key_file)
+        if not path.exists():
+            raise SecurityError(f"{env_key_name}_FILE points to missing file: {path}")
+        key = path.read_text(encoding="utf-8-sig").strip()
+
     if not key:
-        raise SecurityError(f"Environment variable {env_key_name} is required.")
+        raise SecurityError(
+            f"Either {env_key_name} or {env_key_name}_FILE environment variable is required."
+        )
+
+    key = key.strip().strip('"').strip("'")
+    if key.startswith("gAAAAA"):
+        raise SecurityError(
+            f"{env_key_name} looks like encrypted payload (clients.enc), not Fernet key."
+        )
+
     try:
         return Fernet(key.encode("utf-8"))
     except Exception as exc:  # pragma: no cover - defensive
-        raise SecurityError("CLIENTS_KEY has invalid format for Fernet.") from exc
+        raise SecurityError(
+            f"{env_key_name} has invalid format for Fernet. "
+            "Expected URL-safe base64 key (usually 44 chars, ends with '=')."
+        ) from exc
 
 
 def decrypt_clients_file(path: Path, fernet: Fernet) -> dict[str, dict[str, str]]:
