@@ -23,6 +23,15 @@ Telegram-бот для генерации только DOCX-допсоглаше
    - либо `CLIENTS_KEY_FILE` (путь к файлу с ключом).
 6. Удалите/не коммитьте `data/clients.json` и проверьте, что он в `.gitignore`.
 
+## 2.1) Альтернатива без `clients.enc` на сервере (рекомендуется для Render)
+1. Сформируйте base64 из локального `data/clients.json`:
+   ```powershell
+   py -3 -c "import base64, pathlib; print(base64.urlsafe_b64encode(pathlib.Path('data/clients.json').read_text(encoding='utf-8-sig').encode('utf-8')).decode('utf-8'))"
+   ```
+2. Скопируйте строку и добавьте в Render ENV:
+   - `CLIENTS_JSON_B64` = `<скопированная строка>`
+3. В этом режиме `CLIENTS_KEY`/`CLIENTS_KEY_FILE` не обязательны.
+
 ## 3) Локальный запуск
 ```powershell
 pip install -r requirements.txt
@@ -49,7 +58,10 @@ python bot.py
    ```
 4. Добавьте ENV-переменные:
    - `BOT_TOKEN`
-   - `CLIENTS_KEY` (или `CLIENTS_KEY_FILE`)
+   - один из вариантов:
+     - `CLIENTS_JSON_B64` (рекомендуется),
+     - `CLIENTS_KEY` (для `clients.enc`),
+     - `CLIENTS_KEY_FILE` (для `clients.enc` через файл).
 
 Важно: `data/clients.enc` не является ключом. Ключ короткий (обычно 44 символа, заканчивается `=`).
 

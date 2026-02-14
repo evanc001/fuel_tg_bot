@@ -506,8 +506,14 @@ def build_application() -> Application:
     if not bot_token:
         raise RuntimeError("Environment variable BOT_TOKEN is required.")
 
-    if not os.getenv("CLIENTS_KEY") and not os.getenv("CLIENTS_KEY_FILE"):
-        raise RuntimeError("Environment variable CLIENTS_KEY or CLIENTS_KEY_FILE is required.")
+    if (
+        not os.getenv("CLIENTS_JSON_B64")
+        and not os.getenv("CLIENTS_KEY")
+        and not os.getenv("CLIENTS_KEY_FILE")
+    ):
+        raise RuntimeError(
+            "Environment variable CLIENTS_JSON_B64 or CLIENTS_KEY or CLIENTS_KEY_FILE is required."
+        )
 
     aliases = load_aliases(DATA_DIR / "aliases.json")
     products = load_products(DATA_DIR / "products.json")
