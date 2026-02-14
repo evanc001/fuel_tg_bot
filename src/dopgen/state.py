@@ -1,0 +1,21 @@
+﻿from __future__ import annotations
+
+(
+    START,
+    COMPANY_INPUT,
+    COMPANY_SELECT,
+    DOP_NUM,
+    PAYMENT_TYPE,
+    DELIVERY_TYPE,
+    CURRENT_DATE,
+    DELIVERY_DATE,
+    PAY_DATE,
+    PRODUCT_INPUT,
+    PRODUCT_SELECT,
+    TONS,
+    PRICE,
+    LOCATION_INPUT,
+    LOCATION_SELECT,
+    UNLOAD_ADDRESS,
+    CONFIRM,
+) = range(17)

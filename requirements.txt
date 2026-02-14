@@ -1,0 +1,4 @@
+﻿python-telegram-bot>=21,<22
+docxtpl
+cryptography
+num2words
