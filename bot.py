@@ -1,9 +1,11 @@
 ﻿from __future__ import annotations
 
 import asyncio
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
 import os
 import tempfile
+import threading
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
@@ -67,6 +69,33 @@ MENU_BUTTON = "Создать допсоглашение"
 
 def _catalogs(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.application.bot_data["catalogs"]
+
+
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self) -> None:  # noqa: N802
+        if self.path in ("/", "/health"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(b"ok")
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, format: str, *args) -> None:  # noqa: A003
+        return
+
+
+def _start_health_server() -> ThreadingHTTPServer | None:
+    port = (os.getenv("PORT") or "").strip()
+    if not port:
+        return None
+
+    server = ThreadingHTTPServer(("0.0.0.0", int(port)), _HealthHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    logger.info("Health server started on port %s", port)
+    return server
 
 
 def _make_select_keyboard(prefix: str, items: list[tuple[str, str]]) -> InlineKeyboardMarkup:
@@ -564,8 +593,14 @@ def build_application() -> Application:
 def main() -> None:
     # Python 3.14 no longer creates a default event loop in main thread.
     asyncio.set_event_loop(asyncio.new_event_loop())
-    app = build_application()
-    app.run_polling()
+    health_server = _start_health_server()
+    try:
+        app = build_application()
+        app.run_polling()
+    finally:
+        if health_server:
+            health_server.shutdown()
+            health_server.server_close()
 
 
 if __name__ == "__main__":
