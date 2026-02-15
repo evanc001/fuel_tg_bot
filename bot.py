@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import asyncio
+from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import logging
 import os
@@ -32,19 +33,15 @@ from src.dopgen.state import (
     COMPANY_INPUT,
     COMPANY_SELECT,
     CONFIRM,
-    CURRENT_DATE,
     DELIVERY_DATE,
     DELIVERY_TYPE,
-    DOP_NUM,
     LOCATION_INPUT,
     LOCATION_SELECT,
     PAY_DATE,
     PAYMENT_TYPE,
-    PRICE,
     PRODUCT_INPUT,
     PRODUCT_SELECT,
     START,
-    TONS,
     UNLOAD_ADDRESS,
 )
 from src.dopgen.utils import normalize_text, sanitize_filename, search_catalog
@@ -126,6 +123,42 @@ def _find_company_matches(query: str, aliases: dict[str, str], clients: dict[str
     return matches
 
 
+def _parse_company_and_dop_input(text: str) -> tuple[str, str]:
+    parts = [p.strip() for p in (text or "").split(",", 1)]
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        raise ValueError("Введите: компания, номер допсоглашения. Пример: сиб, 12")
+    return parts[0], parts[1]
+
+
+def _parse_product_tons_price_input(text: str) -> tuple[str, int, int]:
+    parts = [p.strip() for p in (text or "").split(",")]
+    if len(parts) != 3:
+        raise ValueError("Введите: продукт, тонны, цена. Пример: дтл, 25, 62500")
+    product_query = parts[0]
+    if not product_query:
+        raise ValueError("Ключ/название продукта не может быть пустым.")
+    try:
+        tons = int(parts[1])
+        price = int(parts[2])
+    except ValueError as exc:
+        raise ValueError("Тонны и цена должны быть целыми числами.") from exc
+    if tons <= 0:
+        raise ValueError("Количество тонн должно быть больше 0.")
+    if price <= 0:
+        raise ValueError("Цена должна быть больше 0.")
+    return product_query, tons, price
+
+
+async def _ask_payment_type_message(target_message) -> None:
+    keyboard = InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("Предоплата", callback_data="payment:prepayment")],
+            [InlineKeyboardButton("Отсрочка", callback_data="payment:deferment")],
+        ]
+    )
+    await target_message.reply_text("Выберите тип оплаты:", reply_markup=keyboard)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
@@ -143,7 +176,8 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return START
 
     await update.message.reply_text(
-        "Введите компанию (название, ключ или алиас):",
+        "Шаг 1/5. Введите компанию и номер допсоглашения через запятую.\n"
+        "Пример: сиб, 12",
         reply_markup=ReplyKeyboardRemove(),
     )
     return COMPANY_INPUT
@@ -151,12 +185,17 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def company_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     catalogs = _catalogs(context)
-    query = update.message.text or ""
-    matches = _find_company_matches(query, catalogs["aliases"], catalogs["clients"])
+    try:
+        company_query, dop_num_value = _parse_company_and_dop_input(update.message.text or "")
+    except ValueError as exc:
+        await update.message.reply_text(str(exc))
+        return COMPANY_INPUT
+
+    matches = _find_company_matches(company_query, catalogs["aliases"], catalogs["clients"])
 
     if not matches:
         await update.message.reply_text(
-            "Компания не найдена. Введите название/алиас ещё раз."
+            "Компания не найдена. Повторите шаг в формате: компания, номер допсоглашения."
         )
         return COMPANY_INPUT
 
@@ -164,11 +203,12 @@ async def company_search_input(update: Update, context: ContextTypes.DEFAULT_TYP
         key = matches[0]
         context.user_data["company_key"] = key
         context.user_data["client_data"] = catalogs["clients"][key]
-        await update.message.reply_text("Введите номер допсоглашения:")
-        return DOP_NUM
+        context.user_data["dop_num"] = dop_num_value
+        await _ask_payment_type_message(update.message)
+        return PAYMENT_TYPE
 
     items = [(key, str(catalogs["clients"][key].get("company_name", ""))) for key in matches[:10]]
-    context.user_data["company_candidates"] = [key for key, _ in items]
+    context.user_data["pending_dop_num"] = dop_num_value
     await update.message.reply_text(
         "Найдено несколько компаний. Выберите нужную:",
         reply_markup=_make_select_keyboard("company", items),
@@ -192,25 +232,15 @@ async def company_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     context.user_data["company_key"] = key
     context.user_data["client_data"] = catalogs["clients"][key]
+    dop_num_value = (context.user_data.pop("pending_dop_num", "") or "").strip()
+    if not dop_num_value:
+        await query.edit_message_text(
+            "Не удалось получить номер допсоглашения. Повторите ввод: компания, номер."
+        )
+        return COMPANY_INPUT
+    context.user_data["dop_num"] = dop_num_value
     await query.edit_message_text(f"Выбрано: {key}")
-    await query.message.reply_text("Введите номер допсоглашения:")
-    return DOP_NUM
-
-
-async def dop_num(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    value = (update.message.text or "").strip()
-    if not value:
-        await update.message.reply_text("Номер допсоглашения не может быть пустым. Повторите ввод.")
-        return DOP_NUM
-
-    context.user_data["dop_num"] = value
-    keyboard = InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("Предоплата", callback_data="payment:prepayment")],
-            [InlineKeyboardButton("Отсрочка", callback_data="payment:deferment")],
-        ]
-    )
-    await update.message.reply_text("Выберите тип оплаты:", reply_markup=keyboard)
+    await _ask_payment_type_message(query.message)
     return PAYMENT_TYPE
 
 
@@ -252,19 +282,12 @@ async def delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         return DELIVERY_TYPE
 
     context.user_data["delivery_type"] = value
-    await query.edit_message_text("Введите дату допсоглашения (ДД.ММ.ГГГГ):")
-    return CURRENT_DATE
-
-
-async def current_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text or ""
-    try:
-        context.user_data["current_date"] = parse_ddmmyyyy(text)
-    except ValueError:
-        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ.ГГГГ.")
-        return CURRENT_DATE
-
-    await update.message.reply_text("Введите дату поставки (ДД.ММ.ГГГГ):")
+    context.user_data["current_date"] = date.today()
+    await query.edit_message_text(
+        f"Дата допсоглашения установлена автоматически: "
+        f"{format_pay_date(context.user_data['current_date'])}.\n"
+        "Введите дату поставки (ДД.ММ.ГГГГ):"
+    )
     return DELIVERY_DATE
 
 
@@ -276,8 +299,16 @@ async def delivery_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ.ГГГГ.")
         return DELIVERY_DATE
 
-    await update.message.reply_text("Введите дату оплаты (ДД.ММ.ГГГГ):")
-    return PAY_DATE
+    if context.user_data.get("payment_type") == "deferment":
+        await update.message.reply_text("Введите дату оплаты (ДД.ММ.ГГГГ):")
+        return PAY_DATE
+
+    context.user_data["pay_date"] = context.user_data["current_date"]
+    await update.message.reply_text(
+        "Шаг 2/5. Введите продукт, количество тонн и цену через запятую.\n"
+        "Пример: дтл, 25, 62500"
+    )
+    return PRODUCT_INPUT
 
 
 async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -288,14 +319,22 @@ async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ.ГГГГ.")
         return PAY_DATE
 
-    await update.message.reply_text("Введите ключ продукта (или часть названия):")
+    await update.message.reply_text(
+        "Шаг 2/5. Введите продукт, количество тонн и цену через запятую.\n"
+        "Пример: дтл, 25, 62500"
+    )
     return PRODUCT_INPUT
 
 
 async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     catalogs = _catalogs(context)
-    query = update.message.text or ""
-    matches = search_catalog(query, catalogs["products"], limit=10)
+    try:
+        product_query, tons_value, price_value = _parse_product_tons_price_input(update.message.text or "")
+    except ValueError as exc:
+        await update.message.reply_text(str(exc))
+        return PRODUCT_INPUT
+
+    matches = search_catalog(product_query, catalogs["products"], limit=10)
 
     if not matches:
         await update.message.reply_text("Продукт не найден. Введите ключ/название ещё раз.")
@@ -303,8 +342,13 @@ async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     if len(matches) == 1:
         context.user_data["product_key"] = matches[0][0]
-        await update.message.reply_text("Введите количество тонн (целое число):")
-        return TONS
+        context.user_data["tons"] = tons_value
+        context.user_data["price"] = price_value
+        await update.message.reply_text("Введите ключ базиса/адреса погрузки (или часть названия):")
+        return LOCATION_INPUT
+
+    context.user_data["pending_tons"] = tons_value
+    context.user_data["pending_price"] = price_value
 
     await update.message.reply_text(
         "Найдено несколько продуктов. Выберите нужный:",
@@ -328,38 +372,15 @@ async def product_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return PRODUCT_INPUT
 
     context.user_data["product_key"] = key
+    tons_value = context.user_data.pop("pending_tons", None)
+    price_value = context.user_data.pop("pending_price", None)
+    if not isinstance(tons_value, int) or not isinstance(price_value, int):
+        await query.edit_message_text("Не удалось получить тонны/цену. Повторите шаг 2/5.")
+        return PRODUCT_INPUT
+    context.user_data["tons"] = tons_value
+    context.user_data["price"] = price_value
     await query.edit_message_text(f"Выбрано: {key}")
-    await query.message.reply_text("Введите количество тонн (целое число):")
-    return TONS
-
-
-async def tons(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = (update.message.text or "").strip()
-    try:
-        value = int(text)
-        if value <= 0:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text("Количество тонн должно быть целым числом больше 0.")
-        return TONS
-
-    context.user_data["tons"] = value
-    await update.message.reply_text("Введите цену (целое число):")
-    return PRICE
-
-
-async def price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = (update.message.text or "").strip()
-    try:
-        value = int(text)
-        if value <= 0:
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text("Цена должна быть целым числом больше 0.")
-        return PRICE
-
-    context.user_data["price"] = value
-    await update.message.reply_text("Введите ключ базиса/адреса погрузки (или часть названия):")
+    await query.message.reply_text("Введите ключ базиса/адреса погрузки (или часть названия):")
     return LOCATION_INPUT
 
 
@@ -480,8 +501,13 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     action = query.data.split(":", 1)[1]
     if action == "cancel":
         context.user_data.clear()
-        await query.edit_message_text("Операция отменена. Используйте /start для нового документа.")
-        return ConversationHandler.END
+        await query.edit_message_text("Операция отменена.")
+        keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
+        await query.message.reply_text(
+            "Можете сразу создать новый документ.",
+            reply_markup=keyboard,
+        )
+        return START
 
     if action != "generate":
         await query.edit_message_text("Некорректная команда подтверждения.")
@@ -513,7 +539,12 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
         await query.edit_message_text("Готово. DOCX сформирован и отправлен.")
         context.user_data.clear()
-        return ConversationHandler.END
+        keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
+        await query.message.reply_text(
+            "Создать ещё один документ?",
+            reply_markup=keyboard,
+        )
+        return START
 
     except Exception as exc:
         logger.exception("Failed to generate document")
@@ -527,11 +558,12 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
+    keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
     await update.message.reply_text(
-        "Диалог отменён. Для нового документа используйте /start.",
-        reply_markup=ReplyKeyboardRemove(),
+        "Диалог отменён. Можно сразу создать новый документ.",
+        reply_markup=keyboard,
     )
-    return ConversationHandler.END
+    return START
 
 
 def build_application() -> Application:
@@ -567,16 +599,12 @@ def build_application() -> Application:
             START: [MessageHandler(filters.TEXT & ~filters.COMMAND, start_menu)],
             COMPANY_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, company_search_input)],
             COMPANY_SELECT: [CallbackQueryHandler(company_select, pattern=r"^company:")],
-            DOP_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, dop_num)],
             PAYMENT_TYPE: [CallbackQueryHandler(payment_type, pattern=r"^payment:")],
             DELIVERY_TYPE: [CallbackQueryHandler(delivery_type, pattern=r"^delivery:")],
-            CURRENT_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, current_date)],
             DELIVERY_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, delivery_date)],
             PAY_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, pay_date)],
             PRODUCT_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_input)],
             PRODUCT_SELECT: [CallbackQueryHandler(product_select, pattern=r"^product:")],
-            TONS: [MessageHandler(filters.TEXT & ~filters.COMMAND, tons)],
-            PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, price)],
             LOCATION_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, location_input)],
             LOCATION_SELECT: [CallbackQueryHandler(location_select, pattern=r"^location:")],
             UNLOAD_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, unload_address)],
