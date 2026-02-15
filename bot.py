@@ -64,6 +64,7 @@ TEMPLATES_DIR = BASE_DIR / "templates"
 BUTTON_CREATE = "Создать доп"
 BUTTON_COMPANIES = "Список компаний"
 BUTTON_BASES = "Список базисов"
+BUTTON_BACK_MENU = "В меню"
 
 
 def _catalogs(context: ContextTypes.DEFAULT_TYPE) -> dict:
@@ -97,13 +98,19 @@ def _main_menu_keyboard() -> ReplyKeyboardMarkup:
     )
 
 
-def _format_compact_list(items: list[str], max_items: int = 30) -> str:
+def _step_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup([[BUTTON_BACK_MENU]], resize_keyboard=True)
+
+
+def _format_numbered_list(items: list[str], max_items: int = 50) -> str:
     values = [item.strip() for item in items if item and item.strip()]
     if not values:
         return "Список пуст."
     shown = values[:max_items]
-    suffix = "" if len(values) <= max_items else ", ..."
-    return ", ".join(shown) + suffix
+    lines = [f"{idx}. {item}" for idx, item in enumerate(shown, start=1)]
+    if len(values) > max_items:
+        lines.append("...")
+    return "\n".join(lines)
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -212,11 +219,15 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
     text = (update.message.text or "").strip()
+    if text == BUTTON_BACK_MENU:
+        context.user_data.clear()
+        await update.message.reply_text("Возврат в меню.", reply_markup=_main_menu_keyboard())
+        return START
 
     if text == BUTTON_COMPANIES:
         clients = _catalogs(context)["clients"]
         await update.message.reply_text(
-            _format_compact_list(list(clients.keys())),
+            _format_numbered_list(list(clients.keys())),
             reply_markup=_main_menu_keyboard(),
         )
         return START
@@ -224,7 +235,7 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if text == BUTTON_BASES:
         locations = _catalogs(context)["locations"]
         await update.message.reply_text(
-            _format_compact_list([str(key).title() for key in locations.keys()]),
+            _format_numbered_list([str(key).title() for key in locations.keys()]),
             reply_markup=_main_menu_keyboard(),
         )
         return START
@@ -235,7 +246,7 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     await update.message.reply_text(
         "компания, № доп. согл",
-        reply_markup=ReplyKeyboardRemove(),
+        reply_markup=_step_menu_keyboard(),
     )
     return COMPANY_INPUT
 
@@ -243,18 +254,21 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def company_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     catalogs = _catalogs(context)
     try:
         company_query, dop_num_value = _parse_company_and_dop_input(update.message.text or "")
     except ValueError as exc:
-        await update.message.reply_text(str(exc))
+        await update.message.reply_text(str(exc), reply_markup=_step_menu_keyboard())
         return COMPANY_INPUT
 
     matches = _find_company_matches(company_query, catalogs["aliases"], catalogs["clients"])
 
     if not matches:
         await update.message.reply_text(
-            "Компания не найдена. Повторите шаг в формате: компания, номер допсоглашения."
+            "Компания не найдена. Повторите шаг в формате: компания, номер допсоглашения.",
+            reply_markup=_step_menu_keyboard(),
         )
         return COMPANY_INPUT
 
@@ -355,57 +369,72 @@ async def delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def delivery_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     text = update.message.text or ""
     try:
         context.user_data["delivery_date"] = parse_ddmmyyyy(text)
     except ValueError:
-        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.")
+        await update.message.reply_text(
+            "Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.",
+            reply_markup=_step_menu_keyboard(),
+        )
         return DELIVERY_DATE
 
     if context.user_data.get("payment_type") == "deferment":
-        await update.message.reply_text("дата оплаты:")
+        await update.message.reply_text("дата оплаты:", reply_markup=_step_menu_keyboard())
         return PAY_DATE
 
     context.user_data["pay_date"] = context.user_data["current_date"]
-    await update.message.reply_text("продукт, количество, цена:")
+    await update.message.reply_text("продукт, количество, цена:", reply_markup=_step_menu_keyboard())
     return PRODUCT_INPUT
 
 
 async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     text = update.message.text or ""
     try:
         context.user_data["pay_date"] = parse_ddmmyyyy(text)
     except ValueError:
-        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.")
+        await update.message.reply_text(
+            "Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.",
+            reply_markup=_step_menu_keyboard(),
+        )
         return PAY_DATE
 
-    await update.message.reply_text("продукт, количество, цена:")
+    await update.message.reply_text("продукт, количество, цена:", reply_markup=_step_menu_keyboard())
     return PRODUCT_INPUT
 
 
 async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     catalogs = _catalogs(context)
     try:
         product_query, tons_value, price_value = _parse_product_tons_price_input(update.message.text or "")
     except ValueError as exc:
-        await update.message.reply_text(str(exc))
+        await update.message.reply_text(str(exc), reply_markup=_step_menu_keyboard())
         return PRODUCT_INPUT
 
     matches = search_catalog(product_query, catalogs["products"], limit=10)
 
     if not matches:
-        await update.message.reply_text("Продукт не найден. Введите ключ/название ещё раз.")
+        await update.message.reply_text(
+            "Продукт не найден. Введите ключ/название ещё раз.",
+            reply_markup=_step_menu_keyboard(),
+        )
         return PRODUCT_INPUT
 
     if len(matches) == 1:
         context.user_data["product_key"] = matches[0][0]
         context.user_data["tons"] = tons_value
         context.user_data["price"] = price_value
-        await update.message.reply_text("базис погрузки:")
+        await update.message.reply_text("базис погрузки:", reply_markup=_step_menu_keyboard())
         return LOCATION_INPUT
 
     context.user_data["pending_tons"] = tons_value
@@ -443,25 +472,30 @@ async def product_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["tons"] = tons_value
     context.user_data["price"] = price_value
     await query.edit_message_text(f"Выбрано: {key}")
-    await query.message.reply_text("базис погрузки:")
+    await query.message.reply_text("базис погрузки:", reply_markup=_step_menu_keyboard())
     return LOCATION_INPUT
 
 
 async def location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     catalogs = _catalogs(context)
     query = update.message.text or ""
     matches = search_catalog(query, catalogs["locations"], limit=10)
 
     if not matches:
-        await update.message.reply_text("Локация не найдена. Введите ключ/название ещё раз.")
+        await update.message.reply_text(
+            "Локация не найдена. Введите ключ/название ещё раз.",
+            reply_markup=_step_menu_keyboard(),
+        )
         return LOCATION_INPUT
 
     if len(matches) == 1:
         context.user_data["location_key"] = matches[0][0]
         if context.user_data.get("delivery_type") == "delivery":
-            await update.message.reply_text("адрес слива:")
+            await update.message.reply_text("адрес слива:", reply_markup=_step_menu_keyboard())
             return UNLOAD_ADDRESS
         return await show_confirm(update, context)
 
@@ -492,7 +526,7 @@ async def location_select(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text(f"Выбрано: {key}")
 
     if context.user_data.get("delivery_type") == "delivery":
-        await query.message.reply_text("адрес слива:")
+        await query.message.reply_text("адрес слива:", reply_markup=_step_menu_keyboard())
         return UNLOAD_ADDRESS
 
     summary_text = _build_summary_text(context)
@@ -509,9 +543,11 @@ async def location_select(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def unload_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if await _deny_if_not_allowed(update, context):
         return ConversationHandler.END
+    if (update.message.text or "").strip() == BUTTON_BACK_MENU:
+        return await cancel(update, context)
     value = (update.message.text or "").strip()
     if not value:
-        await update.message.reply_text("Адрес доставки не может быть пустым.")
+        await update.message.reply_text("Адрес доставки не может быть пустым.", reply_markup=_step_menu_keyboard())
         return UNLOAD_ADDRESS
 
     context.user_data["unload_address"] = value
