@@ -61,11 +61,49 @@ DATA_DIR = BASE_DIR / "data"
 TEMPLATES_DIR = BASE_DIR / "templates"
 
 
-MENU_BUTTON = "Создать допсоглашение"
+BUTTON_CREATE = "Создать доп"
+BUTTON_COMPANIES = "Список компаний"
+BUTTON_BASES = "Список базисов"
 
 
 def _catalogs(context: ContextTypes.DEFAULT_TYPE) -> dict:
     return context.application.bot_data["catalogs"]
+
+
+def _allowed_user_ids(context: ContextTypes.DEFAULT_TYPE) -> set[int]:
+    return context.application.bot_data.get("allowed_user_ids", set())
+
+
+async def _deny_if_not_allowed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    allowed_ids = _allowed_user_ids(context)
+    if not allowed_ids:
+        return False
+
+    user = update.effective_user
+    if user and user.id in allowed_ids:
+        return False
+
+    if update.message:
+        await update.message.reply_text("Доступ запрещён.")
+    elif update.callback_query:
+        await update.callback_query.answer("Доступ запрещён.", show_alert=True)
+    return True
+
+
+def _main_menu_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [[BUTTON_CREATE], [BUTTON_COMPANIES, BUTTON_BASES]],
+        resize_keyboard=True,
+    )
+
+
+def _format_compact_list(items: list[str], max_items: int = 30) -> str:
+    values = [item.strip() for item in items if item and item.strip()]
+    if not values:
+        return "Список пуст."
+    shown = values[:max_items]
+    suffix = "" if len(values) <= max_items else ", ..."
+    return ", ".join(shown) + suffix
 
 
 class _HealthHandler(BaseHTTPRequestHandler):
@@ -160,19 +198,39 @@ async def _ask_payment_type_message(target_message) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     context.user_data.clear()
-    keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
     await update.message.reply_text(
-        "Нажмите кнопку, чтобы начать формирование допсоглашения.",
-        reply_markup=keyboard,
+        "Выберите действие:",
+        reply_markup=_main_menu_keyboard(),
     )
     return START
 
 
 async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     text = (update.message.text or "").strip()
-    if text != MENU_BUTTON:
-        await update.message.reply_text("Используйте кнопку 'Создать допсоглашение'.")
+
+    if text == BUTTON_COMPANIES:
+        clients = _catalogs(context)["clients"]
+        await update.message.reply_text(
+            _format_compact_list(list(clients.keys())),
+            reply_markup=_main_menu_keyboard(),
+        )
+        return START
+
+    if text == BUTTON_BASES:
+        locations = _catalogs(context)["locations"]
+        await update.message.reply_text(
+            _format_compact_list([str(key).title() for key in locations.keys()]),
+            reply_markup=_main_menu_keyboard(),
+        )
+        return START
+
+    if text not in {BUTTON_CREATE, "Создать допсоглашение"}:
+        await update.message.reply_text("Используйте кнопки меню.", reply_markup=_main_menu_keyboard())
         return START
 
     await update.message.reply_text(
@@ -183,6 +241,8 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def company_search_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     catalogs = _catalogs(context)
     try:
         company_query, dop_num_value = _parse_company_and_dop_input(update.message.text or "")
@@ -216,6 +276,8 @@ async def company_search_input(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 async def company_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -244,6 +306,8 @@ async def company_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def payment_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -268,6 +332,8 @@ async def payment_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -287,6 +353,8 @@ async def delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def delivery_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     text = update.message.text or ""
     try:
         context.user_data["delivery_date"] = parse_ddmmyyyy(text)
@@ -304,6 +372,8 @@ async def delivery_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     text = update.message.text or ""
     try:
         context.user_data["pay_date"] = parse_ddmmyyyy(text)
@@ -316,6 +386,8 @@ async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     catalogs = _catalogs(context)
     try:
         product_query, tons_value, price_value = _parse_product_tons_price_input(update.message.text or "")
@@ -347,6 +419,8 @@ async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
 
 async def product_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -374,6 +448,8 @@ async def product_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     catalogs = _catalogs(context)
     query = update.message.text or ""
     matches = search_catalog(query, catalogs["locations"], limit=10)
@@ -397,6 +473,8 @@ async def location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 async def location_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -429,6 +507,8 @@ async def location_select(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def unload_address(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     value = (update.message.text or "").strip()
     if not value:
         await update.message.reply_text("Адрес доставки не может быть пустым.")
@@ -466,6 +546,8 @@ def _build_summary_text(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 
 async def show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     summary_text = _build_summary_text(context)
 
     keyboard = InlineKeyboardMarkup(
@@ -480,6 +562,8 @@ async def show_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     query = update.callback_query
     await query.answer()
 
@@ -491,10 +575,9 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if action == "cancel":
         context.user_data.clear()
         await query.edit_message_text("Операция отменена.")
-        keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
         await query.message.reply_text(
             "Можете сразу создать новый документ.",
-            reply_markup=keyboard,
+            reply_markup=_main_menu_keyboard(),
         )
         return START
 
@@ -528,10 +611,9 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
         await query.edit_message_text("Готово. DOCX сформирован и отправлен.")
         context.user_data.clear()
-        keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
         await query.message.reply_text(
             "Создать ещё один документ?",
-            reply_markup=keyboard,
+            reply_markup=_main_menu_keyboard(),
         )
         return START
 
@@ -546,11 +628,12 @@ async def confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if await _deny_if_not_allowed(update, context):
+        return ConversationHandler.END
     context.user_data.clear()
-    keyboard = ReplyKeyboardMarkup([[MENU_BUTTON]], resize_keyboard=True)
     await update.message.reply_text(
         "Диалог отменён. Можно сразу создать новый документ.",
-        reply_markup=keyboard,
+        reply_markup=_main_menu_keyboard(),
     )
     return START
 
@@ -573,6 +656,15 @@ def build_application() -> Application:
     products = load_products(DATA_DIR / "products.json")
     locations = load_locations(DATA_DIR / "locations.json")
     clients = load_clients_encrypted(DATA_DIR / "clients.enc")
+    allowed_users_raw = (os.getenv("ALLOWED_USER_IDS") or "").strip()
+    allowed_user_ids: set[int] = set()
+    if allowed_users_raw:
+        try:
+            allowed_user_ids = {
+                int(item.strip()) for item in allowed_users_raw.split(",") if item.strip()
+            }
+        except ValueError as exc:
+            raise RuntimeError("ALLOWED_USER_IDS must contain comma-separated integers.") from exc
 
     app = ApplicationBuilder().token(bot_token).build()
     app.bot_data["catalogs"] = {
@@ -581,6 +673,7 @@ def build_application() -> Application:
         "locations": locations,
         "clients": clients,
     }
+    app.bot_data["allowed_user_ids"] = allowed_user_ids
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
