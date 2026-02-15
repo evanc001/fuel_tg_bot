@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from datetime import date, datetime
+import re
 
 
 MONTHS_GENITIVE = {
@@ -20,7 +21,11 @@ MONTHS_GENITIVE = {
 
 
 def parse_ddmmyyyy(text: str) -> date:
-    return datetime.strptime(text.strip(), "%d.%m.%Y").date()
+    value = text.strip()
+    if re.fullmatch(r"\d{2}\.\d{2}$", value):
+        day, month = [int(part) for part in value.split(".")]
+        return date(date.today().year, month, day)
+    return datetime.strptime(value, "%d.%m.%Y").date()
 
 
 def format_current_date(d: date) -> str:

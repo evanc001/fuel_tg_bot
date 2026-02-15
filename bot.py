@@ -176,8 +176,7 @@ async def start_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         return START
 
     await update.message.reply_text(
-        "Шаг 1/5. Введите компанию и номер допсоглашения через запятую.\n"
-        "Пример: сиб, 12",
+        "компания, № доп. согл",
         reply_markup=ReplyKeyboardRemove(),
     )
     return COMPANY_INPUT
@@ -283,11 +282,7 @@ async def delivery_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 
     context.user_data["delivery_type"] = value
     context.user_data["current_date"] = date.today()
-    await query.edit_message_text(
-        f"Дата допсоглашения установлена автоматически: "
-        f"{format_pay_date(context.user_data['current_date'])}.\n"
-        "Введите дату поставки (ДД.ММ.ГГГГ):"
-    )
+    await query.edit_message_text("дата поставки:")
     return DELIVERY_DATE
 
 
@@ -296,18 +291,15 @@ async def delivery_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     try:
         context.user_data["delivery_date"] = parse_ddmmyyyy(text)
     except ValueError:
-        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ.ГГГГ.")
+        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.")
         return DELIVERY_DATE
 
     if context.user_data.get("payment_type") == "deferment":
-        await update.message.reply_text("Введите дату оплаты (ДД.ММ.ГГГГ):")
+        await update.message.reply_text("дата оплаты:")
         return PAY_DATE
 
     context.user_data["pay_date"] = context.user_data["current_date"]
-    await update.message.reply_text(
-        "Шаг 2/5. Введите продукт, количество тонн и цену через запятую.\n"
-        "Пример: дтл, 25, 62500"
-    )
+    await update.message.reply_text("продукт, количество, цена:")
     return PRODUCT_INPUT
 
 
@@ -316,13 +308,10 @@ async def pay_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
         context.user_data["pay_date"] = parse_ddmmyyyy(text)
     except ValueError:
-        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ.ГГГГ.")
+        await update.message.reply_text("Неверная дата. Используйте формат ДД.ММ или ДД.ММ.ГГГГ.")
         return PAY_DATE
 
-    await update.message.reply_text(
-        "Шаг 2/5. Введите продукт, количество тонн и цену через запятую.\n"
-        "Пример: дтл, 25, 62500"
-    )
+    await update.message.reply_text("продукт, количество, цена:")
     return PRODUCT_INPUT
 
 
@@ -344,7 +333,7 @@ async def product_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         context.user_data["product_key"] = matches[0][0]
         context.user_data["tons"] = tons_value
         context.user_data["price"] = price_value
-        await update.message.reply_text("Введите ключ базиса/адреса погрузки (или часть названия):")
+        await update.message.reply_text("базис погрузки:")
         return LOCATION_INPUT
 
     context.user_data["pending_tons"] = tons_value
@@ -380,7 +369,7 @@ async def product_select(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     context.user_data["tons"] = tons_value
     context.user_data["price"] = price_value
     await query.edit_message_text(f"Выбрано: {key}")
-    await query.message.reply_text("Введите ключ базиса/адреса погрузки (или часть названия):")
+    await query.message.reply_text("базис погрузки:")
     return LOCATION_INPUT
 
 
@@ -396,7 +385,7 @@ async def location_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if len(matches) == 1:
         context.user_data["location_key"] = matches[0][0]
         if context.user_data.get("delivery_type") == "delivery":
-            await update.message.reply_text("Введите адрес доставки (слива):")
+            await update.message.reply_text("адрес слива:")
             return UNLOAD_ADDRESS
         return await show_confirm(update, context)
 
@@ -425,7 +414,7 @@ async def location_select(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await query.edit_message_text(f"Выбрано: {key}")
 
     if context.user_data.get("delivery_type") == "delivery":
-        await query.message.reply_text("Введите адрес доставки (слива):")
+        await query.message.reply_text("адрес слива:")
         return UNLOAD_ADDRESS
 
     summary_text = _build_summary_text(context)
